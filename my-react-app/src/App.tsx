@@ -26,14 +26,15 @@ type PokemonListResponse = {
 
 const $pokemonList = createStore<Array<Pokemon>>([]);
 const $total = createStore(0);
+const $error = createStore<string | null>(null);
 
 const showMore = createEvent<void>();
 const pokemonFilled = createEvent<Pokemon>();
 $pokemonList.on(pokemonFilled, (pokemonList: Array<Pokemon>, pokemon: Pokemon) =>
     [...pokemonList, pokemon]);
 
-const getPokemonListFx = createEffect<{ limit: number; offset: number}, PokemonListResponse>
-( async ({limit, offset}) => {
+const getPokemonListFx = createEffect<{ limit: number; offset: number }, PokemonListResponse>
+(async ({limit, offset}) => {
     const url = `https://pokeapi.co/api/v2/pokemon?limit=${limit}&offset=${offset}`;
     const response = await fetch(url);
     const responseData = await response.json();
@@ -62,6 +63,11 @@ const $loadingPokemonList = combine(
     (listPending, pokemonPending) => listPending || pokemonPending
 );
 
+$error
+    .on(getPokemonListFx.failData, (_, error) => error.message)
+    .on(getPokemonFx.failData, (_, error) => error.message)
+    .reset([getPokemonListFx.done, getPokemonFx.done]);
+
 sample({
     clock: showMore,
     source: $pokemonList,
@@ -74,7 +80,7 @@ sample({
 
 sample({
     clock: getPokemonListFx.doneData,
-    fn: ({ urls }) => urls,
+    fn: ({urls}) => urls,
 }).watch((urls) => {
     urls.forEach((url) => {
         getPokemonFx(url);
@@ -83,7 +89,7 @@ sample({
 
 sample({
     clock: getPokemonListFx.doneData,
-    fn: ({ count }) => count,
+    fn: ({count}) => count,
     target: $total,
 });
 
@@ -96,6 +102,7 @@ const PokemonList = () => {
     const loading = useUnit($loadingPokemonList);
     const pokemonFilledList = useUnit($pokemonList);
     const totalPokemon = useUnit($total);
+    const error = useUnit($error);
     useEffect(() => {
         showMore();
     }, []);
@@ -111,11 +118,21 @@ const PokemonList = () => {
 
     return (
         <div className="cards">
-            <ul className="cards-list">{pokemonItems}</ul>
-            {loading ? (
-                <div className="loader">Loading...</div>
+            {error ? (
+                <div>
+                    <p>Ошибка: {error}</p>
+                    <button onClick={() => showMore()}>Retry</button>
+                </div>
             ) : (
-                (pokemonFilledList.length < totalPokemon)&& <button onClick={() => showMore()}>Show more</button>
+                <>
+                    <ul className="cards-list">{pokemonItems}</ul>
+                    {loading ? (
+                        <div className="loader">Loading...</div>
+                    ) : (
+                        pokemonFilledList.length < totalPokemon &&
+                        <button onClick={() => showMore()}>Show more</button>
+                    )}
+                </>
             )}
         </div>
     );
