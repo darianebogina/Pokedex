@@ -78,13 +78,8 @@ sample({
     target: getPokemonListFx,
 });
 
-sample({
-    clock: getPokemonListFx.doneData,
-    fn: ({urls}) => urls,
-}).watch((urls) => {
-    urls.forEach((url) => {
-        getPokemonFx(url);
-    });
+getPokemonListFx.doneData.watch(({ urls }) => {
+    urls.forEach(url => getPokemonFx(url));
 });
 
 sample({
@@ -107,8 +102,8 @@ const PokemonList = () => {
         showMore();
     }, []);
 
-    const pokemonItems = useList(($pokemonList), (pokemon, index) => (
-        <li key={pokemon.id * Math.pow((index + 1), 2)} className="card-item">
+    const pokemonItems = useList(($pokemonList), (pokemon) => (
+        <li key={pokemon.id} className="card-item">
             <img src={pokemon.source} alt={pokemon.name}/>
             <h3>{pokemon.name}</h3>
             <p>{pokemon.id}</p>
