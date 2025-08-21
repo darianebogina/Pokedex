@@ -1,6 +1,6 @@
 import './App.css'
-import {createEffect, createEvent, createStore, sample} from "effector";
-import {useList} from "effector-react";
+import {combine, createEffect, createEvent, createStore, sample} from "effector";
+import {useList, useUnit} from "effector-react";
 import {useEffect} from "react";
 
 export const App = () => {
@@ -19,19 +19,28 @@ type Pokemon = {
     type: string[],
 }
 
+type PokemonListResponse = {
+    urls: string[],
+    count: number,
+};
+
 const $pokemonList = createStore<Array<Pokemon>>([]);
+const $total = createStore(0);
 
 const showMore = createEvent<void>();
 const pokemonFilled = createEvent<Pokemon>();
 $pokemonList.on(pokemonFilled, (pokemonList: Array<Pokemon>, pokemon: Pokemon) =>
     [...pokemonList, pokemon]);
 
-const getPokemonListFx = createEffect
-(async ({limit, offset}: { limit: number; offset: number; }) => {
+const getPokemonListFx = createEffect<{ limit: number; offset: number}, PokemonListResponse>
+( async ({limit, offset}) => {
     const url = `https://pokeapi.co/api/v2/pokemon?limit=${limit}&offset=${offset}`;
     const response = await fetch(url);
     const responseData = await response.json();
-    return responseData.results.map((item: { name: string, url: string }) => item.url) as Array<string>;
+    return {
+        urls: responseData.results.map((item: { name: string, url: string }) => item.url),
+        count: responseData.count,
+    };
 });
 
 const getPokemonFx = createEffect<string, Pokemon>(async (url) => {
@@ -47,6 +56,12 @@ const getPokemonFx = createEffect<string, Pokemon>(async (url) => {
     return pokemon;
 });
 
+const $loadingPokemonList = combine(
+    getPokemonListFx.pending,
+    getPokemonFx.pending,
+    (listPending, pokemonPending) => listPending || pokemonPending
+);
+
 sample({
     clock: showMore,
     source: $pokemonList,
@@ -59,11 +74,17 @@ sample({
 
 sample({
     clock: getPokemonListFx.doneData,
-    fn: (urls) => urls,
+    fn: ({ urls }) => urls,
 }).watch((urls) => {
     urls.forEach((url) => {
         getPokemonFx(url);
     });
+});
+
+sample({
+    clock: getPokemonListFx.doneData,
+    fn: ({ count }) => count,
+    target: $total,
 });
 
 sample({
@@ -72,9 +93,13 @@ sample({
 });
 
 const PokemonList = () => {
+    const loading = useUnit($loadingPokemonList);
+    const pokemonFilledList = useUnit($pokemonList);
+    const totalPokemon = useUnit($total);
     useEffect(() => {
         showMore();
     }, []);
+
     const pokemonItems = useList(($pokemonList), (pokemon, index) => (
         <li key={pokemon.id * Math.pow((index + 1), 2)} className="card-item">
             <img src={pokemon.source} alt={pokemon.name}/>
@@ -83,10 +108,15 @@ const PokemonList = () => {
             <p>{pokemon.type.join(", ")}</p>
         </li>
     ));
+
     return (
         <div className="cards">
             <ul className="cards-list">{pokemonItems}</ul>
-            <button onClick={() => showMore()}>Show more</button>
+            {loading ? (
+                <div className="loader">Loading...</div>
+            ) : (
+                (pokemonFilledList.length < totalPokemon)&& <button onClick={() => showMore()}>Show more</button>
+            )}
         </div>
     );
 };
