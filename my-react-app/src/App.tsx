@@ -12,6 +12,8 @@ export const App = () => {
     )
 };
 
+const POKEMON_PER_PAGE = 20;
+
 type Pokemon = {
     source: string,
     name: string,
@@ -29,9 +31,6 @@ const $total = createStore(0);
 const $error = createStore<string | null>(null);
 
 const showMore = createEvent<void>();
-const pokemonFilled = createEvent<Pokemon>();
-$pokemonList.on(pokemonFilled, (pokemonList: Array<Pokemon>, pokemon: Pokemon) =>
-    [...pokemonList, pokemon]);
 
 const getPokemonListFx = createEffect<{ limit: number; offset: number }, PokemonListResponse>
 (async ({limit, offset}) => {
@@ -44,43 +43,54 @@ const getPokemonListFx = createEffect<{ limit: number; offset: number }, Pokemon
     };
 });
 
-const getPokemonFx = createEffect<string, Pokemon>(async (url) => {
-    const response = await fetch(url);
-    const responseData = await response.json();
+const getPokemonsFx = createEffect(async ({urls} : Pick<PokemonListResponse, "urls">) => {
 
-    const pokemon: Pokemon = {
-        source: responseData.sprites.front_default,
-        name: responseData.name,
-        id: responseData.id,
-        type: responseData.types.map((item: { slot: number, type: { name: string, url: string } }) => item.type.name),
-    };
-    return pokemon;
+    const getPokemonData = async (url: string) => {
+        const response = await fetch(url);
+        const responseData = await response.json();
+
+        const pokemon: Pokemon = {
+            source: responseData.sprites.front_default,
+            name: responseData.name,
+            id: responseData.id,
+            type: responseData.types.map((item: { slot: number, type: { name: string, url: string } }) => item.type.name),
+        };
+        return pokemon;
+    }
+    return Promise.all(urls.map(getPokemonData))
 });
 
 const $loadingPokemonList = combine(
     getPokemonListFx.pending,
-    getPokemonFx.pending,
+    getPokemonsFx.pending,
     (listPending, pokemonPending) => listPending || pokemonPending
 );
 
-$error
-    .on(getPokemonListFx.failData, (_, error) => error.message)
-    .on(getPokemonFx.failData, (_, error) => error.message)
-    .reset([getPokemonListFx.done, getPokemonFx.done]);
+sample({
+    clock: [getPokemonListFx.failData, getPokemonsFx.failData],
+    fn: (error) => error.message,
+    target: $error,
+});
+
+sample({
+    clock: [getPokemonListFx.done, getPokemonsFx.done],
+    target: $error.reinit,
+});
 
 sample({
     clock: showMore,
     source: $pokemonList,
     fn: (pokemonArr) => ({
-        limit: 20,
+        limit: POKEMON_PER_PAGE,
         offset: pokemonArr.length,
     }),
     target: getPokemonListFx,
 });
 
-getPokemonListFx.doneData.watch(({ urls }) => {
-    urls.forEach(url => getPokemonFx(url));
-});
+sample({
+    clock: getPokemonListFx.doneData,
+    target: getPokemonsFx,
+})
 
 sample({
     clock: getPokemonListFx.doneData,
@@ -89,8 +99,10 @@ sample({
 });
 
 sample({
-    clock: getPokemonFx.doneData,
-    target: pokemonFilled,
+    clock: getPokemonsFx.doneData,
+    source: $pokemonList,
+    fn: ((pokemonList, newPokemon) => [...pokemonList, ...newPokemon]),
+    target: $pokemonList,
 });
 
 const PokemonList = () => {
