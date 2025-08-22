@@ -45,6 +45,11 @@ body {
   border-radius: 2rem;
 }
 
+.buttons {
+  display: flex;
+  gap: 1.2rem;
+}
+
 button {
   border-radius: 1rem;
   border-color: transparent;

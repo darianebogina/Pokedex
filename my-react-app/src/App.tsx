@@ -31,7 +31,6 @@ type PaginationConfig = {
     maxLimit?: number;
 };
 
-
 const createPaginationModel = ({
                                    sid, initialPage = 0, initialLimit = 20,
                                    maxLimit = 100,
@@ -99,43 +98,92 @@ const createPaginationModel = ({
 };
 
 
+type QueryConfig<TData, TParams> = {
+    sid: string;
+    queryFn: (params: TParams) => Promise<TData>;
+}
+
+const createQueryModel = <TData, TParams>({sid, queryFn}:
+                                          QueryConfig<TData, TParams>) => {
+
+    const fetch = createEvent<TParams>();
+    const reset = createEvent<void>();
+
+    const fetchFx = createEffect<TParams, TData>(async (params) => {
+        return queryFn(params);
+    });
+
+    const $data = createStore<TData | null>(null, {sid: `${sid}/data`})
+        .on(fetchFx.doneData, (_, result) => result)
+        .reset(reset);
+
+    const $loading = createStore<boolean>(false, {sid: `${sid}/loading`})
+        .on(fetch, () => true)
+        .on(fetchFx.finally, () => false)
+        .reset(reset);
+
+    const $error = createStore<Error | null>(null, {sid: `${sid}/error`})
+        .on(fetch, () => null)
+        .on(fetchFx.failData, (_, error) => error)
+        .reset(reset);
+
+    sample({
+        clock: fetch,
+        target: fetchFx,
+    });
+
+    return {
+        $data,
+        $loading,
+        $error,
+        fetch,
+        reset,
+        fetchFx,
+    };
+};
+
+const queryPokemonList = createQueryModel<PokemonListResponse, { limit: number; offset: number }>({
+    sid: 'pokemonList',
+    queryFn: async ({limit, offset}) => {
+        const url = `https://pokeapi.co/api/v2/pokemon?limit=${limit}&offset=${offset}`;
+        const response = await fetch(url);
+        const responseData = await response.json();
+        return {
+            urls: responseData.results.map((item: { name: string; url: string }) => item.url),
+            count: responseData.count,
+        };
+    },
+});
+
 const $pokemonList = createStore<Array<Pokemon>>([]);
 const $error = createStore<string | null>(null);
 
 const setPokemonList = createEvent<Array<Pokemon>>();
 $pokemonList.on(setPokemonList, (_, newList) => newList);
 
-const getPokemonListFx = createEffect<{ limit: number; offset: number }, PokemonListResponse>
-(async ({limit, offset}) => {
-    const url = `https://pokeapi.co/api/v2/pokemon?limit=${limit}&offset=${offset}`;
-    const response = await fetch(url);
-    const responseData = await response.json();
-    return {
-        urls: responseData.results.map((item: { name: string, url: string }) => item.url),
-        count: responseData.count,
-    };
-});
+const queryPokemon = createQueryModel<Pokemon[], Pick<PokemonListResponse, "urls">>({
+    sid: 'pokemon',
+    queryFn: async ({urls} : Pick<PokemonListResponse, "urls">) => {
 
-const getPokemonsFx = createEffect(async ({urls} : Pick<PokemonListResponse, "urls">) => {
+        const getPokemonData = async (url: string) => {
+            const response = await fetch(url);
+            const responseData = await response.json();
 
-    const getPokemonData = async (url: string) => {
-        const response = await fetch(url);
-        const responseData = await response.json();
-
-        const pokemon: Pokemon = {
-            source: responseData.sprites.front_default,
-            name: responseData.name,
-            id: responseData.id,
-            type: responseData.types.map((item: { slot: number, type: { name: string, url: string } }) => item.type.name),
-        };
-        return pokemon;
+            const pokemon: Pokemon = {
+                source: responseData.sprites.front_default,
+                name: responseData.name,
+                id: responseData.id,
+                type: responseData.types.map((item: { slot: number, type: { name: string, url: string } }) => item.type.name),
+            };
+            return pokemon;
+        }
+        return Promise.all(urls.map(getPokemonData));
     }
-    return Promise.all(urls.map(getPokemonData))
-});
+ });
 
 const $loadingPokemonList = combine(
-    getPokemonListFx.pending,
-    getPokemonsFx.pending,
+    queryPokemonList.$loading,
+    queryPokemon.$loading,
     (listPending, pokemonPending) => listPending || pokemonPending
 );
 
@@ -144,35 +192,37 @@ const pagination = createPaginationModel({
 });
 
 sample({
-    clock: [getPokemonListFx.failData, getPokemonsFx.failData],
-    fn: (error) => error.message,
+    clock: [queryPokemonList.$error, queryPokemon.$error],
+    fn: (error) => error!.message,
     target: $error,
 });
 
 sample({
-    clock: [getPokemonListFx.done, getPokemonsFx.done],
+    clock: [queryPokemonList.$data, queryPokemon.$data],
     target: $error.reinit,
 });
 
 sample({
     clock: [pagination.nextPage, pagination.prevPage],
     source: { limit: pagination.$limit, offset: pagination.$offset },
-    target: getPokemonListFx,
+    target: queryPokemonList.fetch,
 });
 
 sample({
-    clock: getPokemonListFx.doneData,
-    fn: ({count}) => count,
+    clock: queryPokemonList.$data,
+    fn: (data) => data ? data.count : 0,
     target: pagination.setTotalItems,
 });
 
 sample({
-    clock: getPokemonListFx.doneData,
-    target: getPokemonsFx,
+    clock: queryPokemonList.$data,
+    fn: (data) => data!,
+    target: queryPokemon.fetch,
 })
 
 sample({
-    clock: getPokemonsFx.doneData,
+    clock: queryPokemon.$data,
+    fn: (data) => data!,
     target: setPokemonList,
 });
 
