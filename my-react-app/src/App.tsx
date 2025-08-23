@@ -43,31 +43,13 @@ const createPaginationModel = ({
     const setLimit = createEvent<number>();
     const setTotalItems = createEvent<number>();
 
-    const countMaxPage = () => {
-        if ($totalItems.getState() === null) return Infinity;
-        return Math.ceil($totalItems.getState()! / $limit.getState());
-    }
-
     const $currentPage = createStore(initialPage, {sid: `${sid}/currentPage`})
-        .on(setPage, (_, page) => {
-            if (page < 1) return 1;
-            if ($totalItems.getState() !== null) {
-                return Math.min(page, countMaxPage());
-            }
-            return page;
-        })
-        .on(nextPage, (page) => {
-            return Math.min(page + 1, countMaxPage());
-        })
-        .on(prevPage, (page) => Math.max(1, page - 1))
-        .reset(reset)
+        .reset(reset);
 
     const $limit = createStore(initialLimit, {sid: `${sid}/limit`})
-        .on(setLimit, (_, limit) => Math.min(Math.max(1, limit), maxLimit))
         .reset(reset)
 
     const $totalItems = createStore<number | null>(null)
-        .on(setTotalItems, (_, totalItems) => totalItems)
         .reset(reset)
 
     const $offset = combine($currentPage, $limit,
@@ -76,11 +58,54 @@ const createPaginationModel = ({
     const $hasPrevPage = $currentPage.map((curPage) => curPage > 1);
     const $hasNextPage = combine($currentPage, $limit, $totalItems,
         (curPage, limit, total) => {
-            if (total === 0) {
+            if (total === 0 || total === null) {
                 return false;
             }
-            return (curPage * limit) < (total ?? 0);
+            return (curPage * limit) < total;
         });
+
+    const countMaxPage = (totalItems: number | null, limit: number): number => {
+        if (totalItems == null) return Infinity;
+        return Math.ceil(totalItems / limit);
+    }
+
+    sample({
+        clock: setPage,
+        source: {totalItems: $totalItems, limit: $limit},
+        fn: ({totalItems, limit}, page) => {
+            if (page < 1) return 1;
+            return Math.min(page, countMaxPage(totalItems, limit));
+        },
+        target: $currentPage,
+    });
+
+    sample({
+        clock: nextPage,
+        source: {page: $currentPage, totalItems: $totalItems, limit: $limit},
+        fn: ({page, totalItems, limit}) => {
+            return Math.min(page! + 1, countMaxPage(totalItems, limit));
+        },
+        target: $currentPage,
+    });
+
+    sample({
+        clock: prevPage,
+        source: $currentPage,
+        fn: (page) => Math.max(1, page - 1),
+        target: $currentPage,
+    });
+
+    sample({
+        clock: setLimit,
+        fn: (limit) => Math.min(Math.max(1, limit), maxLimit),
+        target: $limit,
+    });
+
+    sample({
+        clock: setTotalItems,
+        target: $totalItems,
+    });
+
     return {
         $currentPage,
         $limit,
@@ -114,22 +139,46 @@ const createQueryModel = <TData, TParams>({sid, queryFn}:
     });
 
     const $data = createStore<TData | null>(null, {sid: `${sid}/data`})
-        .on(fetchFx.doneData, (_, result) => result)
         .reset(reset);
 
     const $loading = createStore<boolean>(false, {sid: `${sid}/loading`})
-        .on(fetch, () => true)
-        .on(fetchFx.finally, () => false)
         .reset(reset);
 
     const $error = createStore<Error | null>(null, {sid: `${sid}/error`})
-        .on(fetch, () => null)
-        .on(fetchFx.failData, (_, error) => error)
         .reset(reset);
 
     sample({
         clock: fetch,
         target: fetchFx,
+    });
+
+    sample({
+        clock: fetchFx.doneData,
+        target: $data,
+    });
+
+    sample({
+        clock: fetch,
+        fn: () => true,
+        target: $loading,
+    });
+
+    sample({
+        clock: fetchFx.finally,
+        fn: () => false,
+        target: $loading,
+    });
+
+    sample({
+        clock: fetch,
+        fn: () => null,
+        target: $error,
+    });
+
+    sample({
+        clock: fetchFx.failData,
+        fn: (error) => error,
+        target: $error,
     });
 
     return {
@@ -159,11 +208,15 @@ const $pokemonList = createStore<Array<Pokemon>>([]);
 const $error = createStore<string | null>(null);
 
 const setPokemonList = createEvent<Array<Pokemon>>();
-$pokemonList.on(setPokemonList, (_, newList) => newList);
+
+sample({
+    clock: setPokemonList,
+    target: $pokemonList,
+});
 
 const queryPokemon = createQueryModel<Pokemon[], Pick<PokemonListResponse, "urls">>({
     sid: 'pokemon',
-    queryFn: async ({urls} : Pick<PokemonListResponse, "urls">) => {
+    queryFn: async ({urls}: Pick<PokemonListResponse, "urls">) => {
 
         const getPokemonData = async (url: string) => {
             const response = await fetch(url);
@@ -173,13 +226,16 @@ const queryPokemon = createQueryModel<Pokemon[], Pick<PokemonListResponse, "urls
                 source: responseData.sprites.front_default,
                 name: responseData.name,
                 id: responseData.id,
-                type: responseData.types.map((item: { slot: number, type: { name: string, url: string } }) => item.type.name),
+                type: responseData.types.map((item: {
+                    slot: number,
+                    type: { name: string, url: string }
+                }) => item.type.name),
             };
             return pokemon;
         }
         return Promise.all(urls.map(getPokemonData));
     }
- });
+});
 
 const $loadingPokemonList = combine(
     queryPokemonList.$loading,
@@ -193,7 +249,7 @@ const pagination = createPaginationModel({
 
 sample({
     clock: [queryPokemonList.$error, queryPokemon.$error],
-    fn: (error) => error!.message,
+    fn: (error) => error ? error.message : null,
     target: $error,
 });
 
@@ -204,7 +260,7 @@ sample({
 
 sample({
     clock: [pagination.nextPage, pagination.prevPage],
-    source: { limit: pagination.$limit, offset: pagination.$offset },
+    source: {limit: pagination.$limit, offset: pagination.$offset},
     target: queryPokemonList.fetch,
 });
 

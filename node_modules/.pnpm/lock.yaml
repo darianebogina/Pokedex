@@ -1,0 +1,32 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      patronum:
+        specifier: ^2.3.0
+        version: 2.3.0(effector@23.4.2)
+
+packages:
+
+  effector@23.4.2:
+    resolution: {integrity: sha512-Uae07sVa6yilnO9FhjFvLVkuakpKTHqn4bIoFxEuDsvNKfFtidLHGi1mv3bjaoJUxj3ldqZDAg3kvELVgMWSjw==}
+    engines: {node: '>=11.0.0'}
+
+  patronum@2.3.0:
+    resolution: {integrity: sha512-BfKIOpoymVz6XnkOn8Fi5QZ1a3r/3lXdd8BcdHmYDbIXPTIRnD1EPFBFev/DheWnOge6/ZswEqgNF2ANLGOxLw==}
+    peerDependencies:
+      effector: ^23
+
+snapshots:
+
+  effector@23.4.2: {}
+
+  patronum@2.3.0(effector@23.4.2):
+    dependencies:
+      effector: 23.4.2
