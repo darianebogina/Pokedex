@@ -2,6 +2,7 @@ import './App.css'
 import {combine, createEffect, createEvent, createStore, sample} from "effector";
 import {useList, useUnit} from "effector-react";
 import {useEffect} from "react";
+import {or} from "patronum";
 
 export const App = () => {
     return (
@@ -141,11 +142,8 @@ const createQueryModel = <TData, TParams>({sid, queryFn}:
     const $data = createStore<TData | null>(null, {sid: `${sid}/data`})
         .reset(reset);
 
-    const $loading = createStore<boolean>(false, {sid: `${sid}/loading`})
-        .reset(reset);
-
-    const $error = createStore<Error | null>(null, {sid: `${sid}/error`})
-        .reset(reset);
+    const $loading = fetchFx.pending;
+    const $error = fetchFx.failData;
 
     sample({
         clock: fetch,
@@ -155,30 +153,6 @@ const createQueryModel = <TData, TParams>({sid, queryFn}:
     sample({
         clock: fetchFx.doneData,
         target: $data,
-    });
-
-    sample({
-        clock: fetch,
-        fn: () => true,
-        target: $loading,
-    });
-
-    sample({
-        clock: fetchFx.finally,
-        fn: () => false,
-        target: $loading,
-    });
-
-    sample({
-        clock: fetch,
-        fn: () => null,
-        target: $error,
-    });
-
-    sample({
-        clock: fetchFx.failData,
-        fn: (error) => error,
-        target: $error,
     });
 
     return {
@@ -237,10 +211,9 @@ const queryPokemon = createQueryModel<Pokemon[], Pick<PokemonListResponse, "urls
     }
 });
 
-const $loadingPokemonList = combine(
+const $loadingPokemonList = or(
     queryPokemonList.$loading,
-    queryPokemon.$loading,
-    (listPending, pokemonPending) => listPending || pokemonPending
+    queryPokemon.$loading
 );
 
 const pagination = createPaginationModel({
