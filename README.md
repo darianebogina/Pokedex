@@ -25,20 +25,20 @@
 
 1.Установка зависимостей
 ```
-npm install
+pnpm install
 ```
 
 2.Запуск проекта в режиме разработки
 ```
-npm run dev
+pnpm run dev
 ```
 
 3.Сборка проекта
 ```
-npm run build
+pnpm run build
 ```
 
 4.Предпросмотр собранного проекта
 ```
-npm run preview
+pnpm run preview
 ```
