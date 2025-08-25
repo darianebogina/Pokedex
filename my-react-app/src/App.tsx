@@ -1,7 +1,7 @@
 import './App.css'
 import {combine, createEffect, createEvent, createStore, sample} from "effector";
 import {useList, useUnit} from "effector-react";
-import {useEffect} from "react";
+import {useEffect, useRef} from "react";
 import {or} from "patronum";
 
 export const App = () => {
@@ -185,6 +185,8 @@ const setPokemonList = createEvent<Array<Pokemon>>();
 
 sample({
     clock: setPokemonList,
+    source: $pokemonList,
+    fn: ((pokemonList, newPokemon) => [...pokemonList, ...newPokemon]),
     target: $pokemonList,
 });
 
@@ -255,28 +257,89 @@ sample({
     target: setPokemonList,
 });
 
-const PokemonList = () => {
-    const loading = useUnit($loadingPokemonList);
-    const pokemonFilledList = useUnit($pokemonList);
-    const totalPokemon = useUnit(pagination.$totalItems);
-    const hasNextPage = useUnit(pagination.$hasNextPage);
-    const hasPrevPage = useUnit(pagination.$hasPrevPage);
-    const curPage = useUnit(pagination.$currentPage);
+const options = {
+    rootMargin: "100px",
+    threshold: 0,
+};
 
-    const next = useUnit(pagination.nextPage);
-    const prev = useUnit(pagination.prevPage);
-    const error = useUnit($error);
+const useInfinityScroll = (loadNewItemsCallback : () => void)=> {
+    const loadRef = useRef<HTMLDivElement | null>(null);
+
     useEffect(() => {
-        next();
-    }, [])
+        if (!loadRef.current) return;
 
-    const pokemonItems = useList(($pokemonList), (pokemon) => (
-        <li key={pokemon.id} className="card-item">
-            <img src={pokemon.source} alt={pokemon.name}/>
+        const observer = new IntersectionObserver(
+            (entries) => {
+                entries.forEach((entry) => {
+                    if (entry.isIntersecting) {
+                        loadNewItemsCallback();
+                    }
+                })
+            },
+            options
+        );
+
+        observer.observe(loadRef.current);
+
+        return () => {
+            observer.disconnect();
+        };
+    }, [loadNewItemsCallback]);
+
+    return loadRef;
+}
+
+const PokemonCard = ({ pokemon }: { pokemon: Pokemon }) => {
+    const imgRef = useRef<HTMLImageElement | null>(null);
+
+    useEffect(() => {
+        if (!imgRef.current) return;
+
+        const observer = new IntersectionObserver(
+            (entries, observer) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        const img = entry.target as HTMLImageElement;
+                        img.src = img.dataset.src!;
+                        observer.unobserve(img);
+                    }
+                });
+            },
+           options
+        );
+
+        observer.observe(imgRef.current);
+
+        return () => {
+            observer.disconnect();
+        };
+    }, [pokemon.source]);
+
+    return (
+        <li className="card-item">
+            <img ref={imgRef} data-src={pokemon.source} alt={pokemon.name} />
             <h3>{pokemon.name}</h3>
             <p>{pokemon.id}</p>
             <p>{pokemon.type.join(", ")}</p>
         </li>
+    );
+};
+
+const PokemonList = () => {
+    const loading = useUnit($loadingPokemonList);
+    // const hasNextPage = useUnit(pagination.$hasNextPage);
+
+    const next = useUnit(pagination.nextPage);
+    const error = useUnit($error);
+
+    const loaderRef = useInfinityScroll(() => {
+        if (!loading) {
+            next();
+        }
+    });
+
+    const pokemonItems = useList($pokemonList, (pokemon) => (
+        <PokemonCard key={pokemon.id} pokemon={pokemon} />
     ));
 
     return (
@@ -289,16 +352,8 @@ const PokemonList = () => {
             ) : (
                 <>
                     <ul className="cards-list">{pokemonItems}</ul>
-                    {loading ? (
-                        <div className="loader">Loading...</div>
-                    ) : (
-                        pokemonFilledList.length < (totalPokemon ?? 0) &&
-                        <div className="buttons">
-                            <button onClick={prev} disabled={!hasPrevPage}>Prev</button>
-                            <p>{curPage}</p>
-                            <button onClick={next} disabled={!hasNextPage}>Next</button>
-                        </div>
-                    )}
+                    {loading && <div className="loader">Loading...</div>}
+                    <div ref={loaderRef} style={{ height: "1px" }} />
                 </>
             )}
         </div>
